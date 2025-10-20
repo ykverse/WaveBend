@@ -1,0 +1,48 @@
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: #0e0e0e;
+  color: white;
+  font-family: 'Poppins', sans-serif;
+  text-align: center;
+}
+
+.title {
+  font-size: 2em;
+  margin-bottom: 0.3em;
+}
+
+.info {
+  font-size: 0.9em;
+  opacity: 0.7;
+  margin-bottom: 1.5em;
+}
+
+.piano {
+  display: flex;
+  gap: 15px;
+}
+
+.key {
+  width: 80px;
+  height: 160px;
+  background: linear-gradient(180deg, #333, #222);
+  border: none;
+  border-radius: 15px;
+  color: white;
+  font-size: 1.5em;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+  transition: all 0.1s ease;
+}
+
+.key:active {
+  transform: scale(0.95);
+}
+
+.key.active {
+  box-shadow: 0 0 25px rgba(0, 255, 180, 0.8);
+  background: linear-gradient(180deg, #222, #111);
+}
