@@ -1,133 +1,124 @@
 // ✅ Web Audio setup
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-// Notes frequency map
+// Map notes to sample files
 const notes = {
-  C: 261.6,
-  D: 293.7,
-  E: 329.6,
-  F: 349.2
+  C: 'C.mp3',
+  D: 'D.mp3',
+  E: 'E.mp3',
+  F: 'F.mp3'
 };
 
-// Variables
-let currentOsc = null;
-let baseFrequency = 0;
-let baseTiltX = 0;
-let baseTiltY = 0;
-let lastShakeTime = 0;
-let vibrato = false;
+// Store loaded buffers
+const buffers = {};
 
-// 🎵 Play note
-function playNote(freq) {
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  const filter = audioCtx.createBiquadFilter();
-
-  filter.type = "lowpass";
-  filter.frequency.value = 800;
-
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-
-  osc.connect(filter).connect(gain).connect(audioCtx.destination);
-  gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
-
-  osc.start();
-  currentOsc = { osc, gain, filter };
+// Preload audio files
+async function loadSamples() {
+  for (let note in notes) {
+    const response = await fetch(notes[note]);
+    const arrayBuffer = await response.arrayBuffer();
+    buffers[note] = await audioCtx.decodeAudioData(arrayBuffer);
+  }
+  console.log('Samples loaded:', Object.keys(buffers));
 }
 
-// 🛑 Stop note
-function stopNote() {
-  if (currentOsc) {
-    currentOsc.osc.stop();
-    currentOsc.osc.disconnect();
-    currentOsc = null;
+// Call preload
+loadSamples();
+
+// Variables for tilt & playback
+let currentSource = null;
+let currentFilter = null;
+let baseTiltX = 0;
+let baseTiltY = 0;
+let basePlaybackRate = 1;
+
+// Unlock AudioContext on first interaction
+function unlockAudio() {
+  if (audioCtx.state !== 'running') audioCtx.resume().then(() => console.log('AudioContext running'));
+}
+
+document.body.addEventListener('click', unlockAudio, { once: true });
+document.body.addEventListener('touchstart', unlockAudio, { once: true });
+
+// 🎹 Play sample with tilt control
+function playSample(note) {
+  if (!buffers[note]) return;
+
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffers[note];
+
+  const gain = audioCtx.createGain();
+  gain.gain.value = 0.8;
+
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 800;
+
+  source.connect(filter).connect(gain).connect(audioCtx.destination);
+  source.start();
+
+  currentSource = source;
+  currentFilter = filter;
+  basePlaybackRate = 1;
+
+  // Auto-calibrate tilt
+  window.addEventListener('deviceorientation', function calibrate(e) {
+    baseTiltX = e.beta;
+    baseTiltY = e.gamma;
+    window.removeEventListener('deviceorientation', calibrate);
+  }, { once: true });
+}
+
+// Stop sample
+function stopSample() {
+  if (currentSource) {
+    currentSource.stop();
+    currentSource.disconnect();
+    currentSource = null;
+    currentFilter.disconnect();
+    currentFilter = null;
   }
 }
 
-// 📱 Device Orientation listener
-window.addEventListener("deviceorientation", (event) => {
-  if (!currentOsc) return;
+// 📱 Device Orientation for tilt control
+window.addEventListener('deviceorientation', (e) => {
+  if (!currentSource) return;
 
-  const tiltX = event.beta;   // Front/back
-  const tiltY = event.gamma;  // Left/right
+  const tiltX = e.beta;
+  const tiltY = e.gamma;
 
   const deltaX = tiltX - baseTiltX;
   const deltaY = tiltY - baseTiltY;
 
-  // 🎚 Pitch control (X tilt)
-  const pitchChange = deltaX * 2; // sensitivity
-  const newFreq = baseFrequency + pitchChange;
-  currentOsc.osc.frequency.setValueAtTime(newFreq, audioCtx.currentTime);
+  // Pitch control via playbackRate (X tilt)
+  const rateChange = deltaX / 90; // small tilt → small change
+  currentSource.playbackRate.value = basePlaybackRate + rateChange;
 
-  // 🎛 Tone/Brightness (Y tilt)
-  const tone = 800 + deltaY * 20;
-  currentOsc.filter.frequency.setValueAtTime(Math.abs(tone), audioCtx.currentTime);
+  // Tone/brightness via filter frequency (Y tilt)
+  const newFreq = 600 + deltaY * 15; // adjust sensitivity
+  currentFilter.frequency.value = Math.max(200, Math.min(5000, newFreq));
 
-  // 🌈 Visual feedback
+  // Optional: visual feedback
   const brightness = Math.min(100, Math.abs(deltaY) * 2);
   document.body.style.background = `radial-gradient(circle, hsl(${brightness}, 80%, 30%) 0%, #000 90%)`;
 });
 
-// 📳 Shake detection for vibrato/echo
-window.addEventListener("devicemotion", (event) => {
-  if (!currentOsc) return;
+// 🖱 / touch events for keys
+document.querySelectorAll('.key').forEach((key) => {
+  const note = key.dataset.note;
 
-  const acc = event.accelerationIncludingGravity;
-  const magnitude = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2);
-
-  const now = Date.now();
-  if (magnitude > 20 && now - lastShakeTime > 1000) {
-    lastShakeTime = now;
-    triggerVibrato();
+  function startNote() {
+    key.classList.add('active');
+    playSample(note);
   }
-});
 
-// 🌊 Vibrato effect
-function triggerVibrato() {
-  if (!currentOsc) return;
-  vibrato = true;
-  const osc = currentOsc.osc;
+  function endNote() {
+    key.classList.remove('active');
+    stopSample();
+  }
 
-  let vibratoOsc = audioCtx.createOscillator();
-  let vibratoGain = audioCtx.createGain();
-  vibratoOsc.frequency.value = 6; // vibrato speed
-  vibratoGain.gain.value = 10;    // depth
-
-  vibratoOsc.connect(vibratoGain).connect(osc.frequency);
-  vibratoOsc.start();
-
-  // Stop vibrato after 2 sec
-  setTimeout(() => {
-    vibratoOsc.stop();
-    vibratoOsc.disconnect();
-    vibrato = false;
-  }, 2000);
-}
-
-// 🖱 Key press logic
-document.querySelectorAll(".key").forEach((key) => {
-  key.addEventListener("touchstart", () => {
-    const note = key.dataset.note;
-    baseFrequency = notes[note];
-    key.classList.add("active");
-
-    // Auto-calibrate
-    window.addEventListener(
-      "deviceorientation",
-      function calibrate(e) {
-        baseTiltX = e.beta;
-        baseTiltY = e.gamma;
-        window.removeEventListener("deviceorientation", calibrate);
-      },
-      { once: true }
-    );
-
-    playNote(baseFrequency);
-  });
-
-  key.addEventListener("touchend", () => {
-    key.classList.remove("active");
-    stopNote();
-  });
+  key.addEventListener('touchstart', startNote);
+  key.addEventListener('touchend', endNote);
+  key.addEventListener('mousedown', startNote); // desktop
+  key.addEventListener('mouseup', endNote);     // desktop
 });
